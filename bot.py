@@ -59,7 +59,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
         await message.answer(f"ပြန်လာတာ ဝမ်းသာပါတယ် {user['name']}!", reply_markup=get_main_kb())
 
 @dp.message(F.text == "⚙️ Profile ပြင်မယ်")
-@dp.message(Command("reprofile"))
 async def edit_profile(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Profile ကို အသစ်ပြန်ဆောက်ပါမယ်။ သင့်နာမည်ကို အရင်ပြောပေးပါ-", reply_markup=ReplyKeyboardRemove())
@@ -105,18 +104,13 @@ async def process_photo(message: types.Message, state: FSMContext):
             await bot.send_photo(chat_id=GROUP_ID, photo=photo_id, caption=admin_msg)
         except: pass
 
-    await message.answer("Profile သိမ်းဆည်းပြီးပါပြီ!", reply_markup=get_main_kb())
-    # --- ကိုယ့်ပုံကိုယ်ပြန်မတွေ့ရအောင် Filter လုပ်ထားသော ရှာဖွေခြင်း ---
-@dp.message(F.text == "🔎 တခြားသူတွေရှာမယ်")
+    await message.answer("Profile သိမ်းဆည်းပြီးပါပြီ!", reply_markup=get_main_kb())@dp.message(F.text == "🔎 တခြားသူတွေရှာမယ်")
 async def find_match(message: types.Message):
     me = await users_col.find_one({"user_id": message.from_user.id})
     liked_list = me.get("liked_users", []) if me else []
     
-    # Filter: ၁။ ကိုယ့် ID မဟုတ်ရ၊ ၂။ ကိုယ် Like လုပ်ပြီးသားသူ မဟုတ်ရ
     pipeline = [
-        {"$match": {
-            "user_id": {"$ne": message.from_user.id, "$nin": liked_list}
-        }},
+        {"$match": {"user_id": {"$ne": message.from_user.id, "$nin": liked_list}}},
         {"$sample": {"size": 1}}
     ]
     
@@ -129,39 +123,43 @@ async def find_match(message: types.Message):
             reply_markup=get_inline_like_kb(target['user_id'])
         )
         break
-        
     if not found:
-        await message.answer("လူသစ်မရှိသေးပါဘူး။ နောက်မှ ပြန်စမ်းကြည့်ပါ!")
+        await message.answer("လူသစ်မရှိသေးပါဘူး။")
 
 @dp.message(F.text == "👤 ကျွန်တော့် Profile")
 async def show_my_profile(message: types.Message):
     user = await users_col.find_one({"user_id": message.from_user.id})
     if user:
-        await message.answer_photo(
-            user['photo_id'], 
-            caption=f"🏷 အမည်: {user['name']}\n🚻 လိင်: {user['gender']}\n🆔 Username: @{user['username']}",
-            reply_markup=get_main_kb()
-        )
+        await message.answer_photo(user['photo_id'], caption=f"🏷 အမည်: {user['name']}\n🚻 လိင်: {user['gender']}\n🆔 @{user['username']}")
 
-# --- Like & Skip Callback Handlers ---
+# --- Like & Skip လုပ်ဆောင်ချက် (Direct Chat Link ပါဝင်သည်) ---
 @dp.callback_query(F.data.startswith("like_"))
 async def handle_inline_like(callback: types.CallbackQuery):
     target_id = int(callback.data.split("_")[1])
     me_id = callback.from_user.id
-    me_username = callback.from_user.username or "NoUsername"
+    me_username = callback.from_user.username or "Username_no"
 
+    # Like လုပ်တာ သိမ်းမယ်
     await users_col.update_one({"user_id": me_id}, {"$addToSet": {"liked_users": target_id}})
     me_profile = await users_col.find_one({"user_id": me_id})
     
+    # ၁။ တစ်ဖက်လူကို Notification ပို့မယ် (Username မရှိရင် နှိပ်လို့ရအောင် လုပ်ထားသည်)
     try:
-        notif_txt = f"🔔 @{me_username} က သင့်ကို Like လုပ်ထားပါတယ်။"
-        await bot.send_photo(chat_id=target_id, photo=me_profile['photo_id'], caption=notif_txt)
+        if me_username != "NoUsername":
+            me_link = f"@{me_username}"
+        else:
+            me_link = f"[{me_profile['name']}](tg://user?id={me_id})"
+            
+        notif_txt = f"🔔 {me_link} က သင့်ကို Like လုပ်ထားပါတယ်။"
+        await bot.send_photo(chat_id=target_id, photo=me_profile['photo_id'], caption=notif_txt, parse_mode="Markdown")
     except: pass
 
+    # ၂။ Match ဖြစ်မဖြစ် စစ်ဆေးမယ်
     target_user = await users_col.find_one({"user_id": target_id})
     if target_user and me_id in target_user.get("liked_users", []):
-        t_un = target_user['username']
-        t_link = f"@{t_un}" if t_un != "NoUsername" else f"[{target_user['name']}](tg://user?id={target_id})"
+        # Username မရှိလည်း တိုက်ရိုက်စကားပြောလို့ရမည့် Link များ
+        t_name = target_user['name']
+        t_link = f"@{target_user['username']}" if target_user['username'] != "NoUsername" else f"[{t_name}](tg://user?id={target_id})"
         m_link = f"@{me_username}" if me_username != "NoUsername" else f"[{me_profile['name']}](tg://user?id={me_id})"
 
         await callback.message.answer(f"🎉 မိတ်ဆွေ/သူငယ်ချင်း ဖြစ်သွားပါပြီ! {t_link} နဲ့ စကားပြောကြည့်ပါ!", parse_mode="Markdown")
