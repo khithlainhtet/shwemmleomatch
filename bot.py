@@ -7,7 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# Railway Environment Variables
+# --- Configuration ---
 TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URL = os.getenv("MONGO_URL")
 GROUP_ID = os.getenv("GROUP_ID") 
@@ -102,10 +102,19 @@ async def process_photo(message: types.Message, state: FSMContext):
         try:
             admin_msg = f"🆕 User အသစ်\n👤 {data['name']}\n🚻 {data['gender']}\n🆔 {user_id}\n🔗 @{username}"
             await bot.send_photo(chat_id=GROUP_ID, photo=photo_id, caption=admin_msg)
-        except: pass
+        except: 
+            pass
 
     await message.answer("Profile သိမ်းဆည်းပြီးပါပြီ!", reply_markup=get_main_kb())# --- ရှာဖွေခြင်း (အမှားပြင်ဆင်ပြီး) ---
     await message.answer("Profile သိမ်းဆည်းပြီးပါပြီ!", reply_markup=get_main_kb())
+
+    @dp.message(F.text == "🔎 တခြားသူတွေရှာမယ်")
+async def find_match(message: types.Message):
+    my_id = message.from_user.id
+    total_users = await users_col.count_documents({"user_id": {"$ne": my_id}})
+    
+    if total_users == 0:
+        await message.answer("လက်ရှိမှာ လူသစ်မရှိသေးပါဘူး။")
 
 @dp.message(F.text == "🔎 တခြားသူတွေရှာမယ်")
     await message.answer("Profile သိမ်းဆည်းပြီးပါပြီ!", reply_markup=get_main_kb())@dp.message(F.text == "🔎 တခြားသူတွေရှာမယ်")
@@ -120,6 +129,8 @@ async def find_match(message: types.Message):
 
     pipeline = [
         {"$match": {"user_id": {"$ne": my_id}}},
+        {"$sample": {"size": 1}}
+    ]
     # လူရှိမရှိ စစ်ဆေးခြင်း
     total_users = await users_col.count_documents({"user_id": {"$ne": my_id}})
     if total_users == 0:
@@ -136,6 +147,8 @@ async def find_match(message: types.Message):
         await message.answer_photo(
             target['photo_id'],
             caption=f"အမည်: {target['name']}\nလိင်: {target['gender']}",
+            reply_markup=get_inline_like_kb(target['user_id'])
+        )
             reply_markup=get_inline_like_kb(target['user_id']))
         
         break
@@ -164,6 +177,11 @@ async def handle_inline_like(callback: types.CallbackQuery):
     
     # ၁။ တစ်ဖက်လူကို Notification ပို့မယ် (Username မရှိရင် နှိပ်လို့ရအောင် လုပ်ထားသည်)
     try:
+        me_label = f"@{me_username}" if me_username != "NoUsername" else f"[{me_profile['name']}](tg://user?id={me_id})"
+        await bot.send_photo(chat_id=target_id, photo=me_profile['photo_id'], 
+                             caption=f"🔔 {me_label} က သင့်ကို Like လုပ်ထားပါတယ်။", parse_mode="Markdown")
+    except: 
+        pass
         m_link = f"@{me_username}" if me_username != "NoUsername" else f"[{me_profile['name']}](tg://user?id={me_id})"
         await bot.send_photo(chat_id=target_id, photo=me_profile['photo_id'], 
                              caption=f"🔔 {m_link} က သင့်ကို Like လုပ်ထားပါတယ်။", parse_mode="Markdown")
@@ -188,6 +206,11 @@ async def handle_inline_like(callback: types.CallbackQuery):
     # ၂။ Match ဖြစ်မဖြစ် စစ်ဆေးမယ်
     target_user = await users_col.find_one({"user_id": target_id})
     if target_user and me_id in target_user.get("liked_users", []):
+        t_label = f"@{target_user['username']}" if target_user['username'] != "NoUsername" else f"[{target_user['name']}](tg://user?id={target_id})"
+        m_label = f"@{me_username}" if me_username != "NoUsername" else f"[{me_profile['name']}](tg://user?id={me_id})"
+
+        await callback.message.answer(f"🎉 မိတ်ဆွေ/သူငယ်ချင်း ဖြစ်သွားပါပြီ! {t_label} နဲ့ စကားပြောကြည့်ပါ!", parse_mode="Markdown")
+        await bot.send_message(target_id, f"🎉 မိတ်ဆွေ/သူငယ်ချင်း ဖြစ်သွားပါပြီ! {m_label} နဲ့ စကားပြောကြည့်ပါ!", parse_mode="Markdown")
         t_link = f"@{target_user['username']}" if target_user['username'] != "NoUsername" else f"[{target_user['name']}](tg://user?id={target_id})"
       
         # Username မရှိလည်း တိုက်ရိုက်စကားပြောလို့ရမည့် Link များ
